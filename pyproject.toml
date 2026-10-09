@@ -1,0 +1,21 @@
+[project]
+name = "robot-learning-notebook"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Angdupsilon", email = "andychen140508@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "matplotlib>=3.11.2",
+    "numpy>=2.5.3",
+    "torch>=2.14.1",
+]
+
+[project.scripts]
+robot-learning-notebook = "robot_learning_notebook:main"
+
+[build-system]
+requires = ["uv_build>=0.12.24,<0.13.0"]
+build-backend = "uv_build"
