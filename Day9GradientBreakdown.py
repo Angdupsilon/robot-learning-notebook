@@ -41,7 +41,7 @@ for iteration in range(n_iters):
 
     # # AI added check each parameters
     # for name, p in model.named_parameters():
-    #     print(f"{name}.grad =\n{p.grad}")
+    #     print(f"{name}.grad =\n{p.grad}") # this calls the gradient for each parameter that we are going to be optimizing, I mistakably added requires_grad=True to dataset, which isn't tracked
     # print("loss:", l.item())
 
     optimizer.step()
