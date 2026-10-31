@@ -268,3 +268,38 @@ for k in range(100):
 
     print(k, loss.data)
 
+
+# compare against pytorch
+
+import torch
+
+# --- 1. Fresh micrograd gradients (no stale accumulation from training) ---
+for p in n.parameters():
+    p.grad = 0.0
+ypred = [n(x) for x in xs]
+loss = sum((yout - ygt)**2 for ygt, yout in zip(ys, ypred))
+loss.backward()
+
+# --- 2. Copy the same weights into PyTorch, one W and b per layer ---
+Ws, bs = [], []
+for layer in n.layers:
+    W = torch.tensor([[w.data for w in neuron.w] for neuron in layer.neurons],
+                     dtype=torch.float64, requires_grad=True)   # (n_out, n_in)
+    b = torch.tensor([neuron.b.data for neuron in layer.neurons],
+                     dtype=torch.float64, requires_grad=True)   # (n_out,)
+    Ws.append(W); bs.append(b)
+
+# --- 3. Same forward pass and loss in PyTorch ---
+h = torch.tensor(xs, dtype=torch.float64)                       # (4, 3)
+for W, b in zip(Ws, bs):
+    h = torch.tanh(h @ W.T + b)                                 # each row = one example
+ys_t = torch.tensor(ys, dtype=torch.float64)
+loss_t = ((h.squeeze(1) - ys_t)**2).sum()
+loss_t.backward()
+
+# --- 4. Compare ---
+print(f"loss     micrograd {loss.data:.12f}   torch {loss_t.item():.12f}")
+mg = n.layers[0].neurons[0].w[0].grad        # first-layer weight: gradient flows through every layer
+pt = Ws[0].grad[0, 0].item()                  # same weight: neuron 0, input 0
+print(f"grad     micrograd {mg:.12f}   torch {pt:.12f}   diff {abs(mg - pt):.2e}")
+assert abs(mg - pt) < 1e-10, "gradients disagree"
