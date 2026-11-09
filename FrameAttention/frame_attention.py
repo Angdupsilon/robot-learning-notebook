@@ -40,9 +40,29 @@ def rot2(x, angle):
     return torch.stack((c * x[..., 0] - s * x[..., 1], s * x[..., 0] + c * x[..., 1]), dim=-1)
 
 
+# The 3x3 products below are written out entry by entry on purpose. matmul and einsum on huge
+# batches of tiny matrices spend their time on overhead on the GPU; these are plain elementwise
+# ops, which torch.compile can merge.
+
 def rot3(x, R, transpose=False):
     """Turn each triple in x (..., n, 3) by its matrix in R (..., n, 3, 3), or by R^T."""
-    return torch.einsum("...ji,...j->...i" if transpose else "...ij,...j->...i", R, x)
+    if transpose:
+        R = R.transpose(-1, -2)
+    x0, x1, x2 = x.unbind(-1)
+    return torch.stack((R[..., 0, 0] * x0 + R[..., 0, 1] * x1 + R[..., 0, 2] * x2,
+                        R[..., 1, 0] * x0 + R[..., 1, 1] * x1 + R[..., 1, 2] * x2,
+                        R[..., 2, 0] * x0 + R[..., 2, 1] * x1 + R[..., 2, 2] * x2), dim=-1)
+
+
+def mul3(A, B):
+    """A @ B for 3x3 matrices (..., 3, 3)."""
+    a00, a01, a02, a10, a11, a12, a20, a21, a22 = A.flatten(-2).unbind(-1)
+    b00, b01, b02, b10, b11, b12, b20, b21, b22 = B.flatten(-2).unbind(-1)
+    return torch.stack((a00 * b00 + a01 * b10 + a02 * b20, a00 * b01 + a01 * b11 + a02 * b21,
+                        a00 * b02 + a01 * b12 + a02 * b22, a10 * b00 + a11 * b10 + a12 * b20,
+                        a10 * b01 + a11 * b11 + a12 * b21, a10 * b02 + a11 * b12 + a12 * b22,
+                        a20 * b00 + a21 * b10 + a22 * b20, a20 * b01 + a21 * b11 + a22 * b21,
+                        a20 * b02 + a21 * b12 + a22 * b22), dim=-1).unflatten(-1, (3, 3))
 
 
 def hat(w):
@@ -67,13 +87,17 @@ def so3_exp(w):
     a = torch.where(small, 1 - th2 / 6, torch.sin(th) / th)
     b = torch.where(small, 0.5 - th2 / 24, (1 - torch.cos(th)) / th2.clamp_min(1e-12))
     K = hat(w)
+    x, y, z = w.unbind(-1)
+    K2 = torch.stack((-(y * y + z * z), x * y, x * z,  # K @ K = w w^T - |w|^2 I
+                      x * y, -(x * x + z * z), y * z,
+                      x * z, y * z, -(x * x + y * y)), dim=-1).unflatten(-1, (3, 3))
     eye = torch.eye(3, dtype=w.dtype, device=w.device).expand_as(K)
-    return eye + a * K + b * (K @ K)
+    return eye + a * K + b * K2
 
 
 def reorthonormalize(R):
     """One Newton-Schulz step: pulls R back onto the rotations after float drift."""
-    return 1.5 * R - 0.5 * R @ R.transpose(-1, -2) @ R
+    return 1.5 * R - 0.5 * mul3(mul3(R, R.transpose(-1, -2)), R)
 
 
 def inv_softplus(y):
@@ -213,7 +237,7 @@ class FrameAttention(nn.Module):
                 # sum_j (A_ij - k u_ij) sin(phi_j - phi_i), using sin(x - y) = sin x cos y - cos x sin y
                 dial_sync = ms * torch.cos(dials) - mc * torch.sin(dials)
                 M = (rM - self.repel * bM).unflatten(-1, (b, 3, 3))
-                gyro_sync = vee(gyros.transpose(-1, -2) @ M)  # same rule for 3D rotations
+                gyro_sync = vee(mul3(gyros.transpose(-1, -2), M))  # same rule for 3D rotations
                 eta = F.softplus(self.sync_rate)
                 dial_step = dial_step + eta[:, :a].view(1, H, 1, a) * dial_sync
                 gyro_step = gyro_step + eta[:, a:].view(1, H, 1, b, 1) * gyro_sync
@@ -224,7 +248,7 @@ class FrameAttention(nn.Module):
                 gyro_move = rot3(u.unflatten(-1, (b, 3)), gyros, transpose=True)  # into my frame
                 gyro_step = gyro_step + eta[:, a:].view(1, H, 1, b, 1) * gyro_move
             new_dials = dials + dial_step
-            new_gyros = reorthonormalize(gyros @ so3_exp(gyro_step))
+            new_gyros = reorthonormalize(mul3(gyros, so3_exp(gyro_step)))
         return Frames(new_dials, new_gyros)
 
 
