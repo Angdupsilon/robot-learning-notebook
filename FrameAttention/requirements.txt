@@ -1,0 +1,5 @@
+# PyTorch is NOT listed: on the Mac it comes from robot-learning-notebook's uv environment,
+# on the DGX Spark from NVIDIA's container (see spark_setup.sh). These are the only extras.
+numpy
+pillow
+pytest

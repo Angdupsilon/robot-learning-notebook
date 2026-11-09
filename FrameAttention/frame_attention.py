@@ -1,0 +1,234 @@
+"""
+Frame Attention, experiment version: all heads at once, one attention call per layer.
+For a short readable version of the same idea, see frame_gpt.py.
+
+Each head's channels are split into four groups:
+
+    [ free | rope | dials | gyros ]
+
+    free   never rotated, so separate objects can still exchange information
+    rope   rotated by fixed position angles (ordinary RoPE); identical in every variant
+    dials  2D rotations, inferred from content and updated every layer   -> tags
+    gyros  3D rotations, inferred from content and updated every layer   -> structure
+
+With g_i = token i's frame and T_ij = g_i^T g_j ("how j looks from where i stands"):
+
+    score_ij = <q_i, T_ij k_j> / sqrt(d)  +  lam * <f_i, f_j>        f = motion fingerprint (optional)
+    out_i    = sum_j A_ij T_ij v_j
+    g_i     <- g_i exp( sync * skew( sum_j (A_ij - repel * u_ij) T_ij )   u = uniform weights
+                      + move * sum_j A_ij T_ij Omega_j T_ij^T )            Omega_j = turn sent by j
+
+Because T_ij = g_i^T g_j, every pairwise term factors: rotate each token into a shared
+"world" frame once, run one ordinary attention call with a few extra value channels,
+rotate the results back.
+"""
+
+import math
+from contextlib import nullcontext
+from typing import NamedTuple
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+# ----------------------------------------------------------------------------- rotations
+
+def rot2(x, angle):
+    """Turn each pair in x (..., n, 2) by its angle in angle (..., n)."""
+    c, s = torch.cos(angle), torch.sin(angle)
+    return torch.stack((c * x[..., 0] - s * x[..., 1], s * x[..., 0] + c * x[..., 1]), dim=-1)
+
+
+def rot3(x, R, transpose=False):
+    """Turn each triple in x (..., n, 3) by its matrix in R (..., n, 3, 3), or by R^T."""
+    return torch.einsum("...ji,...j->...i" if transpose else "...ij,...j->...i", R, x)
+
+
+def hat(w):
+    """A spin (axis * speed), shape (..., 3), as a skew-symmetric 3x3 matrix."""
+    x, y, z = w.unbind(-1)
+    o = torch.zeros_like(x)
+    return torch.stack((o, -z, y, z, o, -x, -y, x, o), dim=-1).reshape(*w.shape, 3)
+
+
+def vee(M):
+    """Read the spin back out of a 3x3 matrix (the inverse of hat, on its skew part)."""
+    return 0.5 * torch.stack((M[..., 2, 1] - M[..., 1, 2],
+                              M[..., 0, 2] - M[..., 2, 0],
+                              M[..., 1, 0] - M[..., 0, 1]), dim=-1)
+
+
+def so3_exp(w):
+    """Rodrigues' formula: spin w -> rotation matrix. Uses a Taylor series near zero."""
+    th2 = (w * w).sum(-1, keepdim=True).unsqueeze(-1)
+    th = th2.clamp_min(1e-12).sqrt()
+    small = th2 < 1e-6
+    a = torch.where(small, 1 - th2 / 6, torch.sin(th) / th)
+    b = torch.where(small, 0.5 - th2 / 24, (1 - torch.cos(th)) / th2.clamp_min(1e-12))
+    K = hat(w)
+    eye = torch.eye(3, dtype=w.dtype, device=w.device).expand_as(K)
+    return eye + a * K + b * (K @ K)
+
+
+def reorthonormalize(R):
+    """One Newton-Schulz step: pulls R back onto the rotations after float drift."""
+    return 1.5 * R - 0.5 * R @ R.transpose(-1, -2) @ R
+
+
+def inv_softplus(y):
+    return math.log(math.expm1(y))
+
+
+# ----------------------------------------------------------------------------- frame state
+
+class Frames(NamedTuple):
+    """Per-head frames, carried from layer to layer next to the residual stream (float32)."""
+    dials: torch.Tensor  # (B, H, N, n_dial)       angles
+    gyros: torch.Tensor  # (B, H, N, n_gyro, 3, 3) rotation matrices
+
+
+def uniform_read(x, attn_mask):
+    """Average of x (B, H, N, C) over the keys each query is allowed to see."""
+    if attn_mask is None:
+        return x.mean(-2, keepdim=True).expand_as(x)
+    w = attn_mask.to(x.dtype)
+    return (w / w.sum(-1, keepdim=True).clamp_min(1.0)) @ x
+
+
+def _no_autocast(device_type):
+    if device_type in ("cuda", "cpu"):
+        return torch.autocast(device_type=device_type, enabled=False)
+    return nullcontext()
+
+
+# ----------------------------------------------------------------------------- the layer
+
+class FrameAttention(nn.Module):
+    """
+    dim, n_heads              usual attention sizes
+    n_free, n_rope            channel pairs per head that are never rotated / rotated by position
+    n_dial, n_gyro            number of 2D dials and 3D gyros per head
+    fingerprint_dim           width of motion fingerprints (0 = no common-fate term)
+    repel                     tokens attended to less than repel * uniform push frames apart
+    use_sync, use_moves       switch each frame force on or off
+    transport_values          rotate values into the reader's frame (out = sum A T v)
+    update_frames             False on the last layer, whose frames nobody reads
+    """
+
+    def __init__(self, dim, n_heads, n_free, n_rope, n_dial, n_gyro, fingerprint_dim=0, fp_head_dim=16,
+                 repel=1.0, sync_init=0.3, move_init=0.1, use_sync=True, use_moves=True,
+                 transport_values=True, update_frames=True):
+        super().__init__()
+        H = n_heads
+        self.H, self.nf, self.nr, self.a, self.b = H, n_free, n_rope, n_dial, n_gyro
+        self.hd = n_free + 2 * n_rope + 2 * n_dial + 3 * n_gyro
+        self.repel, self.use_sync, self.use_moves = repel, use_sync, use_moves
+        has_frames = n_dial + n_gyro > 0
+        self.transport_values = transport_values and has_frames
+        self.update = update_frames and has_frames and (use_sync or use_moves)
+
+        self.qkv = nn.Linear(dim, 3 * H * self.hd, bias=False)
+        self.out = nn.Linear(H * self.hd, dim, bias=False)
+        n_blocks = n_dial + n_gyro
+        if self.update and use_sync:
+            self.sync_rate = nn.Parameter(torch.full((H, n_blocks), inv_softplus(sync_init)))
+        if self.update and use_moves:
+            self.move = nn.Linear(dim, H * (n_dial + 3 * n_gyro), bias=False)  # the turn each token sends
+            self.move_rate = nn.Parameter(torch.full((H, n_blocks), inv_softplus(move_init)))
+        self.fp_dim = fingerprint_dim
+        if fingerprint_dim:
+            self.fp = nn.Linear(fingerprint_dim, H * fp_head_dim, bias=False)
+            self.lam = nn.Parameter(torch.full((H,), inv_softplus(0.1)))
+
+    def _rotate(self, x, dials, gyros, rope=None, inverse=False):
+        """Rotate the dial/gyro channels of x (B, H, N, hd) by each token's frame (or undo it).
+        rope (B|1, 1, N, n_rope) angles are applied to the rope channels when given."""
+        free, r, d, g = x.split((self.nf, 2 * self.nr, 2 * self.a, 3 * self.b), dim=-1)
+        if rope is not None and self.nr:
+            r = rot2(r.unflatten(-1, (self.nr, 2)), rope).flatten(-2)
+        if self.a:
+            d = rot2(d.unflatten(-1, (self.a, 2)), -dials if inverse else dials).flatten(-2)
+        if self.b:
+            g = rot3(g.unflatten(-1, (self.b, 3)), gyros, transpose=inverse).flatten(-2)
+        return torch.cat((free, r, d, g), dim=-1).to(x.dtype)
+
+    def forward(self, h, frames, rope=None, fingerprints=None, attn_mask=None):
+        """
+        h            (B, N, dim)
+        frames       Frames with float32 dials (B, H, N, a) and gyros (B, H, N, b, 3, 3)
+        rope         (B|1, 1, N, n_rope) position angles, or None
+        fingerprints (B, N, fingerprint_dim) or None
+        attn_mask    bool, broadcastable to (B, H, N, N), True = may attend
+        returns      (out (B, N, dim), new Frames)
+        """
+        B, N, _ = h.shape
+        H, hd, a, b = self.H, self.hd, self.a, self.b
+        dials, gyros = frames
+        q, k, v = self.qkv(h).view(B, N, 3, H, hd).permute(2, 0, 3, 1, 4)
+
+        # 1) move queries, keys (and values) out of each token's own frame into the world frame
+        q = self._rotate(q, dials, gyros, rope)
+        k = self._rotate(k, dials, gyros, rope)
+        if self.transport_values:
+            v = self._rotate(v, dials, gyros)
+        q = q * hd ** -0.5
+        if self.fp_dim and fingerprints is not None:
+            f = self.fp(fingerprints).view(B, N, H, -1).transpose(1, 2)
+            f = (f * F.softplus(self.lam).sqrt().view(1, H, 1, 1)).to(q.dtype)
+            q, k = torch.cat((q, f), -1), torch.cat((k, f), -1)
+
+        # 2) one attention call. Extra value channels carry what the frame update needs:
+        #    world-frame dials (cos, sin) and gyros for sync; the turns sent (theta, R w) for moves.
+        vals = [v]
+        if self.update and self.use_sync:
+            vals += [torch.cos(dials), torch.sin(dials), gyros.flatten(-3)]
+        if self.update and self.use_moves:
+            m = self.move(h).view(B, N, H, a + 3 * b).transpose(1, 2).to(dials.dtype)
+            theta, w = m[..., :a], m[..., a:].unflatten(-1, (b, 3))
+            vals += [theta, rot3(w, gyros).flatten(-2)]
+        vals = torch.cat([x.to(q.dtype) for x in vals], dim=-1)
+        read = F.scaled_dot_product_attention(q, k, vals, attn_mask=attn_mask, scale=1.0)
+
+        # 3) values back into each token's own frame
+        o = read[..., :hd]
+        if self.transport_values:
+            o = self._rotate(o, dials, gyros, inverse=True)
+        out = self.out(o.transpose(1, 2).reshape(B, N, H * hd))
+        if not self.update:
+            return out, frames
+        return out, self._update_frames(read[..., hd:], dials, gyros, attn_mask, h.device.type)
+
+    def _update_frames(self, read, dials, gyros, attn_mask, device_type):
+        H, a, b = self.H, self.a, self.b
+        with _no_autocast(device_type):  # frames always update in their own precision (float32)
+            read = read.to(dials.dtype)
+            dial_step = torch.zeros_like(dials)
+            gyro_step = torch.zeros(gyros.shape[:-1], dtype=gyros.dtype, device=gyros.device)
+            if self.use_sync:
+                rc, rs, rM, read = read.split((a, a, 9 * b, read.shape[-1] - 2 * a - 9 * b), dim=-1)
+                base = uniform_read(torch.cat((torch.cos(dials), torch.sin(dials), gyros.flatten(-3)), -1), attn_mask)
+                bc, bs, bM = base.split((a, a, 9 * b), dim=-1)
+                mc, ms = rc - self.repel * bc, rs - self.repel * bs
+                # sum_j (A_ij - k u_ij) sin(phi_j - phi_i), using sin(x - y) = sin x cos y - cos x sin y
+                dial_sync = ms * torch.cos(dials) - mc * torch.sin(dials)
+                M = (rM - self.repel * bM).unflatten(-1, (b, 3, 3))
+                gyro_sync = vee(gyros.transpose(-1, -2) @ M)  # same rule for 3D rotations
+                eta = F.softplus(self.sync_rate)
+                dial_step = dial_step + eta[:, :a].view(1, H, 1, a) * dial_sync
+                gyro_step = gyro_step + eta[:, a:].view(1, H, 1, b, 1) * gyro_sync
+            if self.use_moves:
+                theta_in, u = read.split((a, 3 * b), dim=-1)
+                eta = F.softplus(self.move_rate)
+                dial_step = dial_step + eta[:, :a].view(1, H, 1, a) * theta_in  # 2D turns just add
+                gyro_move = rot3(u.unflatten(-1, (b, 3)), gyros, transpose=True)  # into my frame
+                gyro_step = gyro_step + eta[:, a:].view(1, H, 1, b, 1) * gyro_move
+            new_dials = dials + dial_step
+            new_gyros = reorthonormalize(gyros @ so3_exp(gyro_step))
+        return Frames(new_dials, new_gyros)
+
+
+def identity_frames(B, H, N, n_dial, n_gyro, device=None):
+    dials = torch.zeros(B, H, N, n_dial, device=device)
+    gyros = torch.eye(3, device=device).expand(B, H, N, n_gyro, 3, 3).clone()
+    return Frames(dials, gyros)

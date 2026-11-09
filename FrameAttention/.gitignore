@@ -1,0 +1,4 @@
+# data/ and *.pt are already ignored by robot-learning-notebook/.gitignore
+logs/
+__pycache__/
+.pytest_cache/
