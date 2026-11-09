@@ -15,7 +15,8 @@ import torch
 import torch.nn.functional as F
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from frame_attention import FrameAttention, Frames, hat, identity_frames, reorthonormalize, so3_exp, vee  # noqa: E402
+from frame_attention import (FrameAttention, Frames, KoPEAttention, KoPECoupling, hat, identity_frames,  # noqa: E402
+                             reorthonormalize, so3_exp, vee)
 
 
 def layer(dtype=torch.float64, **kw):
@@ -191,6 +192,44 @@ def test_bf16_autocast_keeps_frames_float32_and_rotations_exact():
     assert err < 1e-5
     assert (out16.float() - out32).abs().max() < 0.05
     assert (new16.dials - new32.dials).abs().max() < 0.05
+
+
+def kope_setup():
+    torch.manual_seed(0)
+    B, H, N, hd = 2, 2, 6, 8
+    x = torch.randn(B, N, H * hd, dtype=torch.float64)
+    phi = torch.randn(B, H, N, hd // 2, dtype=torch.float64) * 3
+    return B, H, N, hd, x, phi, Frames(phi, torch.zeros(B, H, N, 0, 3, 3, dtype=torch.float64))
+
+
+def test_kope_attention_matches_complex_rotation():
+    B, H, N, hd, x, phi, frames = kope_setup()
+    L = KoPEAttention(H * hd, H).double()
+    out, _ = L(x, frames)
+    q, k, v = L.qkv(x).view(B, N, 3, H, hd).permute(2, 0, 3, 1, 4)
+    z = torch.complex(torch.cos(phi) @ L.mix[None], torch.sin(phi) @ L.mix[None])
+    z = z / z.abs()
+    rot = lambda t: torch.view_as_complex(t.unflatten(-1, (hd // 2, 2)).contiguous()) * z
+    qz, kz, vz = rot(q), rot(k), rot(v)
+    A = ((qz.real @ kz.real.transpose(-1, -2) + qz.imag @ kz.imag.transpose(-1, -2)) / math.sqrt(hd)).softmax(-1)
+    o = torch.view_as_real((A.to(vz.dtype) @ vz) * z.conj()).flatten(-2)
+    assert torch.allclose(out, L.out(o.transpose(1, 2).reshape(B, N, H * hd)), atol=1e-10)
+
+
+def test_kope_coupling_matches_reference_update():
+    """The angle update must equal the reference's project, step and renormalize on (cos, sin)."""
+    B, H, N, hd, x, phi, frames = kope_setup()
+    C = KoPECoupling(H * hd, H).double()
+    new = C(x, frames).dials
+    q = F.rms_norm(C.q_proj(x).view(B, N, H, hd).transpose(1, 2), (hd,)) * C.qk_scale
+    k = F.rms_norm(C.k_proj(x).view(B, N, H, hd).transpose(1, 2), (hd,))
+    J = (q @ k.transpose(-1, -2) / math.sqrt(hd)).softmax(-1)
+    delta = (J @ torch.cat((torch.cos(phi), torch.sin(phi)), -1)).reshape(B, H, N, 2, hd // 2)
+    pair = torch.stack((torch.cos(phi), torch.sin(phi)), 3)
+    delta = delta - (delta * pair).sum(3, keepdim=True) * pair
+    updated = F.normalize(pair + C.gamma * delta, dim=3)
+    assert torch.allclose(torch.cos(new), updated[..., 0, :], atol=1e-10)
+    assert torch.allclose(torch.sin(new), updated[..., 1, :], atol=1e-10)
 
 
 def test_sync_turns_attention_groups_into_tags():

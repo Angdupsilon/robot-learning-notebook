@@ -252,6 +252,84 @@ class FrameAttention(nn.Module):
         return Frames(new_dials, new_gyros)
 
 
+# ----------------------------------------------------------------------------- the published baseline
+
+def _rotate_pairs(x, c, s):
+    """Turn each (real, imag) pair in the last dim of x (..., 2n) by the angles with cos c and sin s (..., n)."""
+    re, im = x.unflatten(-1, (x.shape[-1] // 2, 2)).unbind(-1)
+    return torch.stack((re * c - im * s, re * s + im * c), dim=-1).flatten(-2).to(x.dtype)
+
+
+class KoPEAttention(nn.Module):
+    """
+    KoPE attention (arXiv 2604.07904), ported from vit_kope.py in
+    github.com/microsoft/Neuro-inspired_Phase_Encoding with its default settings.
+
+    Every channel pair of a head has one phase. A learned per-head matrix mixes the phases, then
+    q, k and v are rotated by them and the attention output is rotated back. Phases are updated
+    between layers by KoPECoupling, not here. Takes and returns Frames so it fits the same Block.
+    """
+
+    def __init__(self, dim, n_heads, mix_gain=0.1):
+        super().__init__()
+        self.H, self.hd = n_heads, dim // n_heads
+        assert self.hd % 4 == 0, "KoPE needs a head dim divisible by 4"
+        self.qkv = nn.Linear(dim, 3 * dim)
+        self.out = nn.Linear(dim, dim)
+        n = self.hd // 2
+        mix = nn.init.xavier_normal_(torch.empty(n_heads, n, n), gain=mix_gain)
+        self.mix = nn.Parameter(mix + torch.eye(n))
+
+    def _mixed(self, dials):
+        with _no_autocast(dials.device.type):
+            mix = self.mix.to(dials.dtype)[None]  # (1, H, n, n)
+            c, s = torch.cos(dials) @ mix, torch.sin(dials) @ mix
+            inv = (c.square() + s.square()).clamp_min(1e-5).rsqrt()
+            return c * inv, s * inv
+
+    def used_frames(self, frames):
+        """The phases this layer actually rotates by (after mixing), for the grouping metrics."""
+        c, s = self._mixed(frames.dials)
+        return Frames(torch.atan2(s, c), frames.gyros)
+
+    def forward(self, x, frames, rope=None, fingerprints=None, attn_mask=None):
+        B, N, C = x.shape
+        q, k, v = self.qkv(x).view(B, N, 3, self.H, self.hd).permute(2, 0, 3, 1, 4)
+        c, s = self._mixed(frames.dials)
+        q, k, v = _rotate_pairs(q, c, s), _rotate_pairs(k, c, s), _rotate_pairs(v, c, s)
+        o = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
+        o = _rotate_pairs(o, c, -s)
+        return self.out(o.transpose(1, 2).reshape(B, N, C)), frames
+
+
+class KoPECoupling(nn.Module):
+    """
+    One Kuramoto step on the phases, shared by every layer: a separate q/k attention whose values
+    are the phases themselves. KoPE keeps (cos, sin) and does r <- normalize(r + gamma * tangent),
+    where tangent is the part of the attention read perpendicular to r. On the unit circle that
+    is exactly phi <- phi + atan(gamma * sum_j J_ij sin(phi_j - phi_i)), which is what is coded.
+    """
+
+    def __init__(self, dim, n_heads, gamma=0.05):
+        super().__init__()
+        self.H, self.hd, self.gamma = n_heads, dim // n_heads, gamma
+        self.q_proj = nn.Linear(dim, dim)
+        self.k_proj = nn.Linear(dim, dim)
+        self.qk_scale = nn.Parameter(torch.ones(1, n_heads, 1, self.hd))
+
+    def forward(self, x, frames, attn_mask=None):
+        B, N, _ = x.shape
+        dials = frames.dials
+        q = F.rms_norm(self.q_proj(x).view(B, N, self.H, self.hd).transpose(1, 2), (self.hd,))
+        k = F.rms_norm(self.k_proj(x).view(B, N, self.H, self.hd).transpose(1, 2), (self.hd,))
+        q = q * self.qk_scale.to(q.dtype)
+        cos, sin = torch.cos(dials), torch.sin(dials)
+        read = F.scaled_dot_product_attention(q, k, torch.cat((cos, sin), -1).to(q.dtype), attn_mask=attn_mask)
+        with _no_autocast(dials.device.type):
+            rc, rs = read.to(dials.dtype).chunk(2, dim=-1)
+            return Frames(dials + torch.atan(self.gamma * (rs * cos - rc * sin)), frames.gyros)
+
+
 def identity_frames(B, H, N, n_dial, n_gyro, device=None):
     dials = torch.zeros(B, H, N, n_dial, device=device)
     gyros = torch.eye(3, device=device).expand(B, H, N, n_gyro, 3, 3).clone()

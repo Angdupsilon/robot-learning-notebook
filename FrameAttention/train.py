@@ -5,7 +5,8 @@ Train and evaluate one model.
     python train.py --task shapes --variant D --seed 0 --preset quick   # ~1 minute smoke test
 
 tasks:    shapes | clevrtex | movi_a | boxes          (prepare data first: python download_data.py)
-variants: A | A_prime | B | C | D | E                 (see model.py; E is for movi_a only)
+variants: A | A_prime | B | C | D | E | K             (see model.py; E is for movi_a only)
+ablations of D: D_nosync | D_nomoves | D_frozen
 
 Writes runs/<task>/<variant>/seed<seed>/
     metrics.jsonl   one line per evaluation (accuracy, tag gap, FG-ARI, sync) for learning curves
@@ -183,7 +184,7 @@ def grouping(model, data, split, n_images, amp, chunk=64):
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--task", default="shapes", choices=list(TASKS))
-    p.add_argument("--variant", default="D", choices=["A", "A_prime", "B", "C", "D", "E"])
+    p.add_argument("--variant", default="D", choices=["A", "A_prime", "B", "C", "D", "E", "K", "D_nosync", "D_nomoves", "D_frozen"])
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--preset", default="full", choices=["full", "quick"])
     for name, typ in (("steps", int), ("batch", int), ("lr", float), ("layers", int), ("heads", int),

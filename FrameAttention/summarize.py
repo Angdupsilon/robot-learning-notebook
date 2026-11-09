@@ -14,7 +14,7 @@ import math
 import os
 from collections import defaultdict
 
-ORDER = ["A", "A_prime", "B", "C", "D", "E"]
+ORDER = ["A", "A_prime", "B", "C", "D", "E", "K", "D_nosync", "D_nomoves", "D_frozen"]
 COLUMNS = [  # (label, path into results["final"], scale)
     ("iid acc", ("test", "acc"), 100),
     ("iid binding-pair acc", ("test", "acc_pair"), 100),
@@ -54,7 +54,7 @@ def criteria(rows, metric=("test_ood", "acc")):
     """The pre-registered checks, on OOD accuracy."""
     def s(v):
         return stats([get(r["final"], metric) for r in rows.get(v, [])])
-    A, Ap, B, C, D = (s(v) for v in ("A", "A_prime", "B", "C", "D"))
+    A, Ap, B, C, D, K = (s(v) for v in ("A", "A_prime", "B", "C", "D", "K"))
     lines = []
 
     def beats(x, y, name_x, name_y):
@@ -67,6 +67,7 @@ def criteria(rows, metric=("test_ood", "acc")):
 
     lines.append(beats(D, A, "D", "A (RoPE baseline)"))
     lines.append(beats(D, Ap, "D", "A_prime (compute-matched)"))
+    lines.append(beats(D, K, "D", "K (published KoPE)"))
     if B and D:
         pooled = math.sqrt((B[1] ** 2 + D[1] ** 2) / 2)
         close = abs(D[0] - B[0]) <= pooled
@@ -74,6 +75,9 @@ def criteria(rows, metric=("test_ood", "acc")):
                      f" ({100 * (D[0] - B[0]):+.1f} points)")
     if C and D:
         lines.append(f"- C vs D: {100 * (D[0] - C[0]):+.1f} points (what the dials add on top of gyros)")
+    for v, off in (("D_nosync", "sync off"), ("D_nomoves", "moves off"), ("D_frozen", "all frame updates off")):
+        if rows.get(v):  # a PASS means the switched-off force was contributing
+            lines.append(beats(D, s(v), "D", f"{v} ({off})"))
     return lines
 
 

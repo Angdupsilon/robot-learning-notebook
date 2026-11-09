@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Stage 1: every variant x 5 seeds on the synthetic shapes task, then the summary table.
 #
-#   bash run_stage1.sh                          # all 25 runs (finished runs are skipped)
+#   bash run_stage1.sh                          # all 30 runs (finished runs are skipped)
+#   VARIANTS="K" bash run_stage1.sh             # only some variants
+#   VARIANTS="D_nosync D_nomoves D_frozen" SEEDS="0 1 2" bash run_stage1.sh   # the ablations of D
 #   SEEDS="0 1" bash run_stage1.sh              # fewer seeds
 #   EXTRA="--steps 10000" bash run_stage1.sh    # extra flags for every train.py call
 #   PY="uv run python" bash run_stage1.sh       # on the Mac, inside the uv environment
@@ -11,7 +13,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 PY=${PY:-python}
 SEEDS=${SEEDS:-"0 1 2 3 4"}
-VARIANTS=${VARIANTS:-"A A_prime B C D"}
+VARIANTS=${VARIANTS:-"A A_prime B C D K"}
 mkdir -p logs
 for seed in $SEEDS; do
   for v in $VARIANTS; do

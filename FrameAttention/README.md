@@ -15,7 +15,7 @@ saw in training, and its dials form object tags.
 |---|---|
 | `frame_gpt.py` | short Karpathy-style version, for reading (Tiny Shakespeare) |
 | `frame_attention.py` | the layer used in experiments (batched, one attention call per layer) |
-| `model.py` | the transformer and the variants A, A_prime, B, C, D, E |
+| `model.py` | the transformer and the variants A, A_prime, B, C, D, E, K |
 | `tasks/` | data: synthetic shapes, boxes (text), CLEVRTex, MOVi-A, and the shared question generator |
 | `download_data.py` | **one command that downloads or generates every dataset** into `data/` |
 | `train.py` | trains and evaluates one model, writes `runs/<task>/<variant>/seed<k>/` |
@@ -23,12 +23,12 @@ saw in training, and its dials form object tags.
 | `summarize.py` | mean ± std table over seeds, plus the pass/fail checks |
 | `run_stage1.sh`, `run_stage2.sh` | the full experiment grids |
 | `spark_setup.sh` | opens NVIDIA's PyTorch container on the DGX Spark |
-| `tests/` | 26 checks of the math and the pipeline |
+| `tests/` | 29 checks of the math and the pipeline |
 
 ## Variants
 
-Every head has 64 channels: 16 of them carry ordinary RoPE (position) in all variants, and
-the rest are split as below.
+Every head has 64 channels. Except in K, 16 of them carry ordinary RoPE (position), and the
+rest are split as below.
 
 | variant | per head | question it answers |
 |---|---|---|
@@ -38,6 +38,17 @@ the rest are split as below.
 | C | + 6 gyros (sync + moves) | do gyros alone help? |
 | D | + 11 dials + 6 gyros | full Frame Attention |
 | E | D + motion fingerprints (MOVi only) | does common fate help? |
+| K | published KoPE: 32 phases, no RoPE channels | does D beat the published method? |
+| D_nosync | D, sync force off | does sync contribute? |
+| D_nomoves | D, moves force off | do moves contribute? |
+| D_frozen | D, both off: frames stay as initialized from content | do the frame updates matter at all? |
+
+K is ported from the reference `vit_kope.py` in
+[microsoft/Neuro-inspired_Phase_Encoding](https://github.com/microsoft/Neuro-inspired_Phase_Encoding)
+([paper](https://arxiv.org/abs/2604.07904)) with that file's defaults: phases start from 2D position
+(base 20), one coupling module shared by all layers, step 0.05, learned phase mixing, values rotated,
+and absolute position embeddings. The only change is skipping the last layer's phase update, which
+nothing reads.
 
 ## Setup
 
@@ -46,7 +57,7 @@ the rest are split as below.
 
 ```bash
 cd robot-learning-notebook/FrameAttention
-uv run --with pytest pytest tests -q          # 26 passed, about 1 minute
+uv run --with pytest pytest tests -q          # 29 tests, about 1 minute (1 skips without scikit-learn)
 uv run python download_data.py --only shapes boxes tinyshakespeare
 uv run python train.py --task shapes --variant D --preset quick
 ```
@@ -58,7 +69,7 @@ Spark itself.
 ```bash
 git clone <your robot-learning-notebook repo> && cd robot-learning-notebook
 bash FrameAttention/spark_setup.sh            # prints the torch version and GPU, then gives a shell
-python -m pytest tests -q                     # inside the container: 26 passed
+python -m pytest tests -q                     # inside the container: 29 tests
 ```
 
 Files the container creates in `data/` and `runs/` are owned by root; run
@@ -106,7 +117,7 @@ starting long runs. The step counts in the `full` presets are estimates.
 ## Step 3: Stage 1 (the decisive test)
 
 ```bash
-bash run_stage1.sh          # A, A_prime, B, C, D x 5 seeds; finished runs are skipped
+bash run_stage1.sh          # A, A_prime, B, C, D, K x 5 seeds; finished runs are skipped
 python summarize.py --task shapes
 ```
 
@@ -125,7 +136,9 @@ The synthetic task:
 
 1. **Primary:** D beats A on OOD accuracy by more than 2× the seed spread.
 2. **Not just compute:** D also beats A_prime by more than 2× the seed spread.
-3. **Mechanism:** D's tag gap is clearly above zero and rises during training
+3. **Beyond published work:** D also beats K by more than 2× the seed spread. Added on
+   2026-11-08, after Stage 1 had started but before any D run had finished.
+4. **Mechanism:** D's tag gap is clearly above zero and rises during training
    (`metrics.jsonl`), and FG-ARI from frames matches the true objects.
 
 How to read the outcomes:
@@ -134,7 +147,23 @@ How to read the outcomes:
 |---|---|
 | B ≈ D | gyros aren't earning their cost |
 | D ≈ A_prime | the gain is compute |
+| D ≈ K | the gain is what KoPE already showed |
 | A ≈ D | the idea doesn't work here (still a reportable result) |
+
+### Ablations of D
+
+Added on 2026-11-09, after Stage 1 finished, because D's tag gap stayed flat across layers and
+after step 2,500. These are follow-up diagnostics, not part of the pass/fail checks above.
+
+```bash
+VARIANTS="D_nosync D_nomoves D_frozen" SEEDS="0 1 2" bash run_stage1.sh
+```
+
+| result | meaning |
+|---|---|
+| D_frozen ≈ D | the benefit comes from the content-set rotations, not from frames evolving across layers |
+| D beats D_frozen, D_nosync ≈ D | moves carry the benefit; sync isn't needed |
+| D beats D_frozen, D_nomoves ≈ D | sync carries the benefit |
 
 ## Step 4: Stage 2 (only if Stage 1 passes)
 

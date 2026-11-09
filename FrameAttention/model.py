@@ -13,6 +13,11 @@ Variants (every head has 64 channels; 8 rope pairs = 16 channels in all variants
     C        + gyros with sync and moves. Do gyros alone help?
     D        + dials and gyros. The full Frame Attention.
     E        D + motion fingerprints (MOVi only). Does common fate help?
+    K        published KoPE (arXiv 2604.07904): all 64 channels are phases, no rope channels.
+             The baseline D has to beat for a claim beyond KoPE.
+    D_nosync   D with the sync force off (moves only).
+    D_nomoves  D with the moves force off (sync only).
+    D_frozen   D with both off: frames stay as initialized from content. Do the updates matter at all?
 """
 
 import math
@@ -20,10 +25,11 @@ import math
 import torch
 import torch.nn as nn
 
-from frame_attention import FrameAttention, Frames, so3_exp
+from frame_attention import FrameAttention, Frames, KoPEAttention, KoPECoupling, so3_exp
 
 HEAD_DIM = 64
 N_ROPE = 8  # rope pairs per head (16 channels)
+KOPE_BASE = 20.0  # frequency base of KoPE's 2D starting phases
 
 #  channels per head:  free  +  rope (16)  +  2 x dials  +  3 x gyros  =  64
 VARIANTS = {
@@ -33,9 +39,13 @@ VARIANTS = {
     "C":       dict(n_free=30, n_dial=0,  n_gyro=6),
     "D":       dict(n_free=8,  n_dial=11, n_gyro=6),
     "E":       dict(n_free=8,  n_dial=11, n_gyro=6),
+    "K":       dict(n_free=0,  n_dial=32, n_gyro=0, n_rope=0, kope=True),
+    "D_nosync":  dict(n_free=8, n_dial=11, n_gyro=6, use_sync=False),
+    "D_nomoves": dict(n_free=8, n_dial=11, n_gyro=6, use_moves=False),
+    "D_frozen":  dict(n_free=8, n_dial=11, n_gyro=6, use_sync=False, use_moves=False),
 }
 for _name, _v in VARIANTS.items():
-    assert _v["n_free"] + 2 * N_ROPE + 2 * _v["n_dial"] + 3 * _v["n_gyro"] == HEAD_DIM, _name
+    assert _v["n_free"] + 2 * _v.get("n_rope", N_ROPE) + 2 * _v["n_dial"] + 3 * _v["n_gyro"] == HEAD_DIM, _name
 
 
 def rope_angles(coords, n_rope, base):
@@ -53,8 +63,11 @@ class Block(nn.Module):
     def __init__(self, dim, n_heads, layout, update_frames, fingerprint_dim, mlp_ratio=4):
         super().__init__()
         self.ln1 = nn.LayerNorm(dim)
-        self.attn = FrameAttention(dim, n_heads, n_rope=N_ROPE, fingerprint_dim=fingerprint_dim,
-                                   update_frames=update_frames, **layout)
+        if layout.get("kope"):
+            self.attn = KoPEAttention(dim, n_heads)
+        else:
+            self.attn = FrameAttention(dim, n_heads, n_rope=N_ROPE, fingerprint_dim=fingerprint_dim,
+                                       update_frames=update_frames, **layout)
         self.ln2 = nn.LayerNorm(dim)
         self.mlp = nn.Sequential(nn.Linear(dim, mlp_ratio * dim), nn.GELU(), nn.Linear(mlp_ratio * dim, dim))
 
@@ -79,6 +92,7 @@ class FrameTransformer(nn.Module):
         self.variant, self.kind, self.dim, self.H = variant, kind, dim, n_heads
         self.n_dial, self.n_gyro = layout["n_dial"], layout["n_gyro"]
         self.has_frames = self.n_dial + self.n_gyro > 0
+        self.kope = layout.get("kope", False)
         self.fingerprint_dim = fingerprint_dim
 
         self.cls = nn.Parameter(torch.zeros(1, 1, dim))
@@ -92,12 +106,21 @@ class FrameTransformer(nn.Module):
             ys, xs = torch.meshgrid(torch.arange(g), torch.arange(g), indexing="ij")
             patch_angles = rope_angles(torch.stack((xs.flatten(), ys.flatten()), -1), N_ROPE, base=100.0)
             angles = torch.cat((torch.zeros(self.n_prefix, N_ROPE), patch_angles), 0)  # CLS/question: no rotation
+            if self.kope:
+                phases = rope_angles(torch.stack((xs.flatten(), ys.flatten()), -1), self.n_dial, base=KOPE_BASE)
+                phases = torch.cat((torch.zeros(self.n_prefix, self.n_dial), phases), 0)
         else:
             self.n_prefix = 1
             angles = rope_angles(torch.arange(1 + max_len), N_ROPE, base=10000.0)
+            if self.kope:
+                phases = rope_angles(torch.arange(1 + max_len), self.n_dial, base=10000.0)
         self.register_buffer("rope", angles[None, None], persistent=False)  # (1, 1, N, n_rope)
 
-        if self.has_frames:
+        if self.kope:  # KoPE starts its phases from position and keeps absolute position embeddings
+            self.register_buffer("phase0", phases[None, None], persistent=False)
+            self.pos_embed = nn.Parameter(torch.zeros(1, phases.shape[0], dim))
+            self.coupling = KoPECoupling(dim, n_heads)
+        elif self.has_frames:
             self.frame_norm = nn.LayerNorm(dim)
             self.frame_init = nn.Linear(dim, n_heads * (self.n_dial + 3 * self.n_gyro))
         self.blocks = nn.ModuleList(
@@ -106,7 +129,9 @@ class FrameTransformer(nn.Module):
         self.ln_f = nn.LayerNorm(dim)
         self.head = nn.Linear(dim, n_answers)
         self.apply(self._init_weights)
-        if self.has_frames:  # starting angles spread ~frame_init_std radians, set by content
+        if self.kope:
+            nn.init.trunc_normal_(self.pos_embed, std=0.02)
+        elif self.has_frames:  # starting angles spread ~frame_init_std radians, set by content
             nn.init.normal_(self.frame_init.weight, std=frame_init_std / math.sqrt(dim))
 
     @staticmethod
@@ -123,6 +148,9 @@ class FrameTransformer(nn.Module):
         """Starting frames from content: tokens with the same content start with the same tag,
         different content starts spread apart, so the sync rule is active from the first step."""
         B, N, _ = x.shape
+        if self.kope:
+            return Frames(self.phase0[:, :, :N].expand(B, self.H, N, -1),
+                          x.new_zeros(B, self.H, N, 0, 3, 3, dtype=torch.float32))
         if not self.has_frames:
             return Frames(x.new_zeros(B, self.H, N, 0, dtype=torch.float32),
                           x.new_zeros(B, self.H, N, 0, 3, 3, dtype=torch.float32))
@@ -145,6 +173,8 @@ class FrameTransformer(nn.Module):
     def forward(self, images=None, q_tokens=None, text=None, fingerprints=None, return_internals=False):
         x, attn_mask = self.embed(images, q_tokens, text)
         N = x.shape[1]
+        if self.kope:
+            x = x + self.pos_embed[:, :N]
         frames = self.init_frames(x)
         rope = self.rope[:, :, :N]
         fp = None
@@ -152,10 +182,12 @@ class FrameTransformer(nn.Module):
             fp = torch.cat((fingerprints.new_zeros(x.shape[0], self.n_prefix, fingerprints.shape[-1]),
                             fingerprints), 1).to(x.dtype)
         frames_per_layer = []
-        for blk in self.blocks:
+        for i, blk in enumerate(self.blocks):
             if return_internals:
-                frames_per_layer.append(frames)
+                frames_per_layer.append(blk.attn.used_frames(frames) if self.kope else frames)
             x, frames = blk(x, frames, rope, fp, attn_mask)
+            if self.kope and i < len(self.blocks) - 1:  # nothing reads the phases after the last layer
+                frames = self.coupling(x, frames, attn_mask)
         x = self.ln_f(x)
         logits = self.head(x[:, 0])
         if not return_internals:

@@ -292,7 +292,7 @@ def test_grouping_metrics_on_perfect_and_collapsed_frames():
 
 # ----------------------------------------------------------------------------- model
 
-@pytest.mark.parametrize("variant", ["A", "B", "C", "D", "E"])
+@pytest.mark.parametrize("variant", ["A", "B", "C", "D", "E", "K"])
 def test_model_variants_forward_backward(variant):
     torch.manual_seed(0)
     fp = 16 if variant == "E" else 0
@@ -310,6 +310,22 @@ def test_model_variants_forward_backward(variant):
         assert (g.transpose(-1, -2) @ g - torch.eye(3)).abs().max() < 1e-5
 
 
+@pytest.mark.parametrize("variant,updates", [("D", True), ("D_nosync", True), ("D_nomoves", True), ("D_frozen", False)])
+def test_ablations_switch_off_only_what_they_name(variant, updates):
+    torch.manual_seed(0)
+    model = FrameTransformer(variant, n_answers=10, n_heads=2, n_layers=3, img_size=32, patch=8, vocab_size=20)
+    x = dict(images=torch.randn(3, 3, 32, 32), q_tokens=torch.randint(0, 20, (3, 4)))
+    logits, internals = model(**x, return_internals=True)
+    first, second = internals["frames"][:2]
+    assert (not torch.equal(first.dials, second.dials)) == updates
+    assert (not torch.equal(first.gyros, second.gyros)) == updates
+    names = {n.rsplit(".", 1)[-1] for n, _ in model.named_parameters()}
+    assert ("sync_rate" in names) == (variant in ("D", "D_nomoves"))
+    assert ("move_rate" in names) == (variant in ("D", "D_nosync"))
+    logits.sum().backward()
+    assert all(torch.isfinite(p.grad).all() for p in model.parameters() if p.grad is not None)
+
+
 def test_text_model_and_param_counts():
     counts = {}
     for v in ("A", "B", "C", "D"):
@@ -319,8 +335,8 @@ def test_text_model_and_param_counts():
         assert m(text=text).shape == (2, 33)
         counts[v] = sum(p.numel() for p in m.parameters())
     assert max(counts.values()) / min(counts.values()) < 1.15  # same head width; frames add little
-    assert all(VARIANTS[v]["n_free"] + 16 + 2 * VARIANTS[v]["n_dial"] + 3 * VARIANTS[v]["n_gyro"] == 64
-               for v in VARIANTS)
+    assert all(VARIANTS[v]["n_free"] + 2 * VARIANTS[v].get("n_rope", 8) + 2 * VARIANTS[v]["n_dial"]
+               + 3 * VARIANTS[v]["n_gyro"] == 64 for v in VARIANTS)
 
 
 def test_compute_matched_baseline_has_at_least_d_flops():
@@ -336,15 +352,16 @@ def test_compute_matched_baseline_has_at_least_d_flops():
 
 def test_train_and_summarize_end_to_end(shapes_dir, tmp_path):
     runs = tmp_path / "runs"
-    for v in ("A", "A_prime", "B", "C", "D"):
+    for v in ("A", "A_prime", "B", "C", "D", "K", "D_frozen"):
         for seed in (0, 1):
             subprocess.run([sys.executable, "train.py", "--task", "shapes", "--variant", v, "--seed", str(seed),
                             "--preset", "quick", "--steps", "6", "--eval-every", "3", "--data", shapes_dir,
                             "--out", str(runs), "--device", "cpu"], cwd=ROOT, check=True, capture_output=True)
             r = json.load(open(runs / "shapes" / v / f"seed{seed}" / "results.json"))
             assert 0 <= r["final"]["test_ood"]["acc"] <= 1 and r["final"]["test_ood"]["n"] > 0
-            if v in ("B", "C", "D"):
+            if v in ("B", "C", "D", "K", "D_frozen"):
                 assert "fg_ari_frames" in r["final"]["grouping"]["val"]
     out = subprocess.run([sys.executable, "summarize.py", "--runs", str(runs)], cwd=ROOT, check=True,
                          capture_output=True, text=True).stdout
-    assert "| D |" in out and "D beats A" in out
+    assert "| D |" in out and "D beats A" in out and "| K |" in out and "D beats K" in out
+    assert "| D_frozen |" in out and "D beats D_frozen" in out
