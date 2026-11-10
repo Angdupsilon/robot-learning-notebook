@@ -3,7 +3,7 @@
 #
 #   bash run_stage1.sh                          # all 30 runs (finished runs are skipped)
 #   VARIANTS="K" bash run_stage1.sh             # only some variants
-#   VARIANTS="D_nosync D_nomoves D_frozen" SEEDS="0 1 2" bash run_stage1.sh   # the ablations of D
+#   VARIANTS="D_nosync D_nomoves D_frozen D_random" bash run_stage1.sh   # the ablations of D
 #   SEEDS="0 1" bash run_stage1.sh              # fewer seeds
 #   EXTRA="--steps 10000" bash run_stage1.sh    # extra flags for every train.py call
 #   PY="uv run python" bash run_stage1.sh       # on the Mac, inside the uv environment

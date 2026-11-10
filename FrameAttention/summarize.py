@@ -14,7 +14,7 @@ import math
 import os
 from collections import defaultdict
 
-ORDER = ["A", "A_prime", "B", "C", "D", "E", "K", "D_nosync", "D_nomoves", "D_frozen"]
+ORDER = ["A", "A_prime", "B", "C", "D", "E", "K", "D_nosync", "D_nomoves", "D_frozen", "D_random"]
 COLUMNS = [  # (label, path into results["final"], scale)
     ("iid acc", ("test", "acc"), 100),
     ("iid binding-pair acc", ("test", "acc_pair"), 100),
@@ -75,9 +75,13 @@ def criteria(rows, metric=("test_ood", "acc")):
                      f" ({100 * (D[0] - B[0]):+.1f} points)")
     if C and D:
         lines.append(f"- C vs D: {100 * (D[0] - C[0]):+.1f} points (what the dials add on top of gyros)")
-    for v, off in (("D_nosync", "sync off"), ("D_nomoves", "moves off"), ("D_frozen", "all frame updates off")):
+    for v, off in (("D_nosync", "sync off"), ("D_nomoves", "moves off"), ("D_frozen", "all frame updates off"),
+                   ("D_random", "random fixed frames")):
         if rows.get(v):  # a PASS means the switched-off force was contributing
             lines.append(beats(D, s(v), "D", f"{v} ({off})"))
+    weak = [v for v in ORDER if rows.get(v) and (stats([get(r["final"], ("test", "acc")) for r in rows[v]]) or (1,))[0] < 0.9]
+    if weak:
+        lines.append(f"- **Below 90% iid, so comparisons with these are confounded by training:** {', '.join(weak)}")
     return lines
 
 

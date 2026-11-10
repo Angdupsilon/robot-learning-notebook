@@ -22,8 +22,9 @@ saw in training, and its dials form object tags.
 | `metrics.py` | tag gap, FG-ARI from clustering frames, collapse monitor |
 | `summarize.py` | mean ± std table over seeds, plus the pass/fail checks |
 | `run_stage1.sh`, `run_stage2.sh` | the full experiment grids |
+| `run_tune.sh`, `pick_tuning.py` | the learning-rate and step-budget sweep from `PREDICTIONS.md` |
 | `spark_setup.sh` | opens NVIDIA's PyTorch container on the DGX Spark |
-| `tests/` | 29 checks of the math and the pipeline |
+| `tests/` | 36 checks of the math and the pipeline |
 
 ## Variants
 
@@ -42,6 +43,7 @@ rest are split as below.
 | D_nosync | D, sync force off | does sync contribute? |
 | D_nomoves | D, moves force off | do moves contribute? |
 | D_frozen | D, both off: frames stay as initialized from content | do the frame updates matter at all? |
+| D_random | D_frozen, with random frames fixed per token position | is the gain binding, or does any fixed rotation give it? |
 
 K is ported from the reference `vit_kope.py` in
 [microsoft/Neuro-inspired_Phase_Encoding](https://github.com/microsoft/Neuro-inspired_Phase_Encoding)
@@ -57,7 +59,7 @@ nothing reads.
 
 ```bash
 cd robot-learning-notebook/FrameAttention
-uv run --with pytest pytest tests -q          # 29 tests, about 1 minute (1 skips without scikit-learn)
+uv run --with pytest pytest tests -q          # 36 tests, about 1 minute (1 skips without scikit-learn)
 uv run python download_data.py --only shapes boxes tinyshakespeare
 uv run python train.py --task shapes --variant D --preset quick
 ```
@@ -69,7 +71,7 @@ Spark itself.
 ```bash
 git clone <your robot-learning-notebook repo> && cd robot-learning-notebook
 bash FrameAttention/spark_setup.sh            # prints the torch version and GPU, then gives a shell
-python -m pytest tests -q                     # inside the container: 29 tests
+python -m pytest tests -q                     # inside the container: 36 tests
 ```
 
 Files the container creates in `data/` and `runs/` are owned by root; run
@@ -156,7 +158,7 @@ Added on 2026-11-09, after Stage 1 finished, because D's tag gap stayed flat acr
 after step 2,500. These are follow-up diagnostics, not part of the pass/fail checks above.
 
 ```bash
-VARIANTS="D_nosync D_nomoves D_frozen" SEEDS="0 1 2" bash run_stage1.sh
+VARIANTS="D_nosync D_nomoves D_frozen D_random" bash run_stage1.sh
 ```
 
 | result | meaning |
@@ -164,6 +166,19 @@ VARIANTS="D_nosync D_nomoves D_frozen" SEEDS="0 1 2" bash run_stage1.sh
 | D_frozen ≈ D | the benefit comes from the content-set rotations, not from frames evolving across layers |
 | D beats D_frozen, D_nosync ≈ D | moves carry the benefit; sync isn't needed |
 | D beats D_frozen, D_nomoves ≈ D | sync carries the benefit |
+| D_random ≈ D_frozen | fixed rotations alone give the gain, so it isn't about binding objects |
+
+### Tuning the baselines
+
+At lr 1e-3 and 30,000 steps, A, A_prime and K stay below 90% iid, so comparing D with them is
+confounded by training. `run_tune.sh` runs the sweep in `PREDICTIONS.md` on seed 0, baselines first.
+
+```bash
+bash run_tune.sh                          # lr 3e-4, 1e-3, 3e-3 at 30,000 steps
+python pick_tuning.py --steps 30000       # choose by iid validation; no OOD shown
+STEPS=60000 bash run_tune.sh              # if a variant is still rising or below 90%
+python pick_tuning.py --steps 30000 --reveal   # only after the settings are chosen
+```
 
 ## Step 4: Stage 2 (only if Stage 1 passes)
 

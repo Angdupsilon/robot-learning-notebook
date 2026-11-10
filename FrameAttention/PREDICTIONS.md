@@ -12,6 +12,7 @@ Anything below is exploratory and cannot count as a confirmed prediction:
 - Seed 0 learning curves for A, A_prime and D, and D's per-layer tag gap.
 
 Everything from Stage 1 is a pilot. The paper's main table comes from runs under the rules below.
+Amendment 1 lists what was seen after this list was written.
 
 ## Analysis rules
 
@@ -82,4 +83,57 @@ answer changes to the distractor object's attribute.
 
 ## Amendments
 
-None yet.
+### Amendment 1 (2026-11-09): results seen after writing, and registration timing
+
+**Reason.** More Stage 1 runs finished and were looked at after the list at the top was written.
+No prediction, threshold or analysis rule is changed by this amendment.
+
+**Also seen before this amendment:**
+
+- The Shapes summary table below, at lr 1e-3 and 30,000 steps.
+- B's seed 0 per-layer tag gap (0.445, 0.444, 0.455, 0.464, 0.485, 0.449) and B's seed 0 learning curve.
+
+| variant | seeds | iid acc | iid binding-pair acc | OOD acc | OOD gap | tag gap | FG-ARI frames | FG-ARI content | dial sync |
+|---|---|---|---|---|---|---|---|---|---|
+| A | 5 | 60.7 ± 6.7 | 80.5 ± 10.0 | 5.4 ± 6.8 | 75.1 | – | – | 52.9 ± 8.4 | – |
+| A_prime | 5 | 54.9 ± 2.6 | 70.7 ± 5.2 | 0.2 ± 0.2 | 70.5 | – | – | 51.6 ± 4.1 | – |
+| B | 5 | 95.4 ± 0.9 | 97.9 ± 0.3 | 60.9 ± 2.3 | 37.0 | 0.443 ± 0.029 | 60.0 ± 2.6 | 54.1 ± 5.8 | 0.577 ± 0.018 |
+| C | 5 | 95.0 ± 2.8 | 98.1 ± 0.3 | 61.8 ± 5.6 | 36.3 | – | 56.5 ± 2.8 | 53.8 ± 4.8 | – |
+| D | 5 | 96.5 ± 0.4 | 98.2 ± 0.2 | 66.5 ± 6.2 | 31.7 | 0.415 ± 0.049 | 55.3 ± 4.8 | 51.6 ± 2.9 | 0.609 ± 0.019 |
+| K | 3 | 60.8 ± 4.0 | 79.7 ± 7.7 | 1.9 ± 2.7 | 77.8 | 0.145 ± 0.017 | 46.6 ± 1.6 | 42.7 ± 15.3 | 0.922 ± 0.009 |
+| D_nosync | 3 | 96.3 ± 0.7 | 97.9 ± 0.5 | 59.9 ± 4.3 | 38.0 | 0.396 ± 0.030 | 47.5 ± 1.0 | 48.5 ± 1.6 | 0.567 ± 0.016 |
+| D_nomoves | 3 | 95.1 ± 1.5 | 98.0 ± 0.6 | 59.3 ± 7.5 | 38.7 | 0.428 ± 0.024 | 55.8 ± 4.6 | 50.4 ± 2.0 | 0.604 ± 0.018 |
+| D_frozen | 3 | 95.2 ± 1.3 | 97.5 ± 0.4 | 51.4 ± 12.8 | 46.1 | 0.393 ± 0.009 | 46.5 ± 2.1 | 45.7 ± 1.8 | 0.545 ± 0.016 |
+
+OOD gap is iid binding-pair accuracy minus OOD accuracy, computed from the means.
+
+**What this means for the predictions:**
+
+- **Baselines are confounded in this pilot.** A, A_prime and K are all below the 90% iid requirement,
+  so their comparisons with D say nothing clean yet about binding.
+- **B1, B2:** informed by this table. They count only if the runs under the analysis rules confirm them.
+- **C1:** D vs D_frozen is NOT SEP here (+15.1 points OOD, pooled std 10.0, seeds 5/3), against the
+  prediction. C1 is left as written and will be tested with 5 seeds under the analysis rules.
+- **C5:** mean D dial sync is visible above, so C5 is informed by this table.
+- **M6:** FG-ARI by layer has not been seen, but per-layer tag gap has for B and D.
+- **The other predictions** concern runs or analyses that had not been done at this date.
+
+**Registration timing.** Registration on OSF is deferred until Stage 1 is finished, so the decision
+to pursue publication can use the pilot. All Shapes runs finished before registration are therefore
+exploratory. Only runs started after registration can confirm a prediction. Registration comes
+before any CLEVRTex, MOVi, Boxes or 3D task result, and before any frame-swap analysis (M1 to M5).
+
+### Amendment 2 (2026-11-09): how the control and the tuning are implemented
+
+**Reason.** The random-frame control and the tuning sweep were built. This fixes their details
+before any result from them exists. No prediction, threshold or analysis rule is changed.
+
+- **C3 is the variant `D_random`:** D_frozen's layout, with no content-based frame initialization.
+  Each token position gets its own random frame, drawn once per model from the same 1 radian spread
+  as `--frame-init-std`, and the frame stays the same for every image.
+- **The sweep is `run_tune.sh`:** learning rates {3e-4, 1e-3, 3e-3}, seed 0, with 20 evaluations per
+  run so that 90% of training falls exactly on one.
+- **The choice is `pick_tuning.py`:** without `--reveal` it reads only iid validation accuracy and
+  prints no OOD numbers. The learning rate is chosen per variant.
+- **The plateau rule can pass while a model is still undertrained,** because the learning rate has
+  decayed by the last 10% of training. The 90% iid requirement is checked separately for that reason.

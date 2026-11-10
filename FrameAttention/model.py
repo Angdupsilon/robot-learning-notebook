@@ -18,6 +18,8 @@ Variants (every head has 64 channels; 8 rope pairs = 16 channels in all variants
     D_nosync   D with the sync force off (moves only).
     D_nomoves  D with the moves force off (sync only).
     D_frozen   D with both off: frames stay as initialized from content. Do the updates matter at all?
+    D_random   D_frozen, but the frames are random, fixed per token position and independent of content.
+               Is the gain about binding, or does any fixed rotation give it?
 """
 
 import math
@@ -43,6 +45,7 @@ VARIANTS = {
     "D_nosync":  dict(n_free=8, n_dial=11, n_gyro=6, use_sync=False),
     "D_nomoves": dict(n_free=8, n_dial=11, n_gyro=6, use_moves=False),
     "D_frozen":  dict(n_free=8, n_dial=11, n_gyro=6, use_sync=False, use_moves=False),
+    "D_random":  dict(n_free=8, n_dial=11, n_gyro=6, use_sync=False, use_moves=False, random_frames=True),
 }
 for _name, _v in VARIANTS.items():
     assert _v["n_free"] + 2 * _v.get("n_rope", N_ROPE) + 2 * _v["n_dial"] + 3 * _v["n_gyro"] == HEAD_DIM, _name
@@ -88,6 +91,7 @@ class FrameTransformer(nn.Module):
         else:
             fingerprint_dim = 0  # only E sees motion
         layout = {k: v for k, v in VARIANTS[variant].items()}
+        self.random_frames = layout.pop("random_frames", False)
         dim = HEAD_DIM * n_heads
         self.variant, self.kind, self.dim, self.H = variant, kind, dim, n_heads
         self.n_dial, self.n_gyro = layout["n_dial"], layout["n_gyro"]
@@ -120,6 +124,9 @@ class FrameTransformer(nn.Module):
             self.register_buffer("phase0", phases[None, None], persistent=False)
             self.pos_embed = nn.Parameter(torch.zeros(1, phases.shape[0], dim))
             self.coupling = KoPECoupling(dim, n_heads)
+        elif self.random_frames:  # same ~frame_init_std radian spread as the content-set starting frames
+            z = torch.randn(1, n_heads, angles.shape[0], self.n_dial + 3 * self.n_gyro) * frame_init_std
+            self.register_buffer("frame0", z, persistent=False)
         elif self.has_frames:
             self.frame_norm = nn.LayerNorm(dim)
             self.frame_init = nn.Linear(dim, n_heads * (self.n_dial + 3 * self.n_gyro))
@@ -131,7 +138,7 @@ class FrameTransformer(nn.Module):
         self.apply(self._init_weights)
         if self.kope:
             nn.init.trunc_normal_(self.pos_embed, std=0.02)
-        elif self.has_frames:  # starting angles spread ~frame_init_std radians, set by content
+        elif self.has_frames and not self.random_frames:  # starting angles spread ~frame_init_std radians, set by content
             nn.init.normal_(self.frame_init.weight, std=frame_init_std / math.sqrt(dim))
 
     @staticmethod
@@ -154,7 +161,10 @@ class FrameTransformer(nn.Module):
         if not self.has_frames:
             return Frames(x.new_zeros(B, self.H, N, 0, dtype=torch.float32),
                           x.new_zeros(B, self.H, N, 0, 3, 3, dtype=torch.float32))
-        z = self.frame_init(self.frame_norm(x)).view(B, N, self.H, -1).transpose(1, 2).float()
+        if self.random_frames:
+            z = self.frame0[:, :, :N].expand(B, -1, -1, -1)
+        else:
+            z = self.frame_init(self.frame_norm(x)).view(B, N, self.H, -1).transpose(1, 2).float()
         dials = z[..., :self.n_dial]
         gyros = so3_exp(z[..., self.n_dial:].unflatten(-1, (self.n_gyro, 3)))
         return Frames(dials, gyros)

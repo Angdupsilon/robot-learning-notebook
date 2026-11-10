@@ -310,7 +310,8 @@ def test_model_variants_forward_backward(variant):
         assert (g.transpose(-1, -2) @ g - torch.eye(3)).abs().max() < 1e-5
 
 
-@pytest.mark.parametrize("variant,updates", [("D", True), ("D_nosync", True), ("D_nomoves", True), ("D_frozen", False)])
+@pytest.mark.parametrize("variant,updates", [("D", True), ("D_nosync", True), ("D_nomoves", True), ("D_frozen", False),
+                                             ("D_random", False)])
 def test_ablations_switch_off_only_what_they_name(variant, updates):
     torch.manual_seed(0)
     model = FrameTransformer(variant, n_answers=10, n_heads=2, n_layers=3, img_size=32, patch=8, vocab_size=20)
@@ -324,6 +325,46 @@ def test_ablations_switch_off_only_what_they_name(variant, updates):
     assert ("move_rate" in names) == (variant in ("D", "D_nosync"))
     logits.sum().backward()
     assert all(torch.isfinite(p.grad).all() for p in model.parameters() if p.grad is not None)
+
+
+def test_random_frames_ignore_content():
+    torch.manual_seed(0)
+    model = FrameTransformer("D_random", n_answers=10, n_heads=2, n_layers=3, img_size=32, patch=8, vocab_size=20)
+    q = torch.randint(0, 20, (3, 4))
+    a = model(images=torch.randn(3, 3, 32, 32), q_tokens=q, return_internals=True)[1]["frames"][0]
+    b = model(images=torch.randn(3, 3, 32, 32), q_tokens=q, return_internals=True)[1]["frames"][0]
+    assert torch.equal(a.dials, b.dials) and torch.equal(a.gyros, b.gyros)  # the image doesn't matter
+    assert not torch.equal(a.dials[:, :, 0], a.dials[:, :, 1])              # but each position differs
+    assert (a.gyros.transpose(-1, -2) @ a.gyros - torch.eye(3)).abs().max() < 1e-5
+    assert not any("frame_init" in n for n, _ in model.named_parameters())
+
+
+def test_pick_tuning_uses_validation_and_hides_ood(tmp_path, capsys):
+    import pick_tuning as T
+
+    def write(lr, variant, val, earlier, ood):
+        d = tmp_path / "steps100" / f"lr{lr}" / "shapes" / variant / "seed0"
+        d.mkdir(parents=True)
+        (d / "metrics.jsonl").write_text("\n".join(
+            json.dumps(dict(step=s, val=dict(acc=a))) for s, a in ((50, 0.1), (90, earlier), (100, val))))
+        final = dict(val=dict(acc=val), test=dict(acc=val, acc_pair=val), test_ood=dict(acc=ood))
+        (d / "results.json").write_text(json.dumps(dict(variant=variant, config=dict(steps=100), final=final)))
+
+    write("3e-4", "A", 0.80, 0.70, 0.99)   # best OOD, must not be chosen
+    write("1e-3", "A", 0.95, 0.945, 0.05)
+    write("3e-3", "A", 0.60, 0.59, 0.50)
+    write("3e-4", "D", 0.70, 0.69, 0.40)
+    runs = T.load_runs(str(tmp_path / "steps100"))
+    assert T.choose(runs["A"], T.LRS) == "1e-3"
+    assert abs(runs["A"]["1e-3"]["gain"] - 0.005) < 1e-9
+    lines, chosen = T.report(runs, T.LRS, 100)
+    text = "\n".join(lines)
+    assert chosen == dict(A="1e-3", D="3e-4")
+    assert "OOD" not in text and "99.0" not in text
+    assert "Sweep incomplete for: D" in text and "confounded: D" in text
+    shown = "\n".join(T.reveal(runs, chosen))
+    assert "| A | 1e-3 | 95.0 | 95.0 | 5.0 | 90.0 | clean |" in shown
+    assert "| D | 3e-4 | 70.0 | 70.0 | 40.0 | 30.0 | confounded |" in shown
 
 
 def test_text_model_and_param_counts():
@@ -352,16 +393,17 @@ def test_compute_matched_baseline_has_at_least_d_flops():
 
 def test_train_and_summarize_end_to_end(shapes_dir, tmp_path):
     runs = tmp_path / "runs"
-    for v in ("A", "A_prime", "B", "C", "D", "K", "D_frozen"):
+    for v in ("A", "A_prime", "B", "C", "D", "K", "D_frozen", "D_random"):
         for seed in (0, 1):
             subprocess.run([sys.executable, "train.py", "--task", "shapes", "--variant", v, "--seed", str(seed),
                             "--preset", "quick", "--steps", "6", "--eval-every", "3", "--data", shapes_dir,
                             "--out", str(runs), "--device", "cpu"], cwd=ROOT, check=True, capture_output=True)
             r = json.load(open(runs / "shapes" / v / f"seed{seed}" / "results.json"))
             assert 0 <= r["final"]["test_ood"]["acc"] <= 1 and r["final"]["test_ood"]["n"] > 0
-            if v in ("B", "C", "D", "K", "D_frozen"):
+            if v in ("B", "C", "D", "K", "D_frozen", "D_random"):
                 assert "fg_ari_frames" in r["final"]["grouping"]["val"]
     out = subprocess.run([sys.executable, "summarize.py", "--runs", str(runs)], cwd=ROOT, check=True,
                          capture_output=True, text=True).stdout
     assert "| D |" in out and "D beats A" in out and "| K |" in out and "D beats K" in out
     assert "| D_frozen |" in out and "D beats D_frozen" in out
+    assert "| D_random |" in out and "D beats D_random" in out and "Below 90% iid" in out
