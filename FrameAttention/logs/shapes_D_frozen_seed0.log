@@ -1,0 +1,222 @@
+Uninstalled 1 package in 0.56ms
+Installed 1 package in 1ms
+W1109 13:07:54.902000 3414309 torch/_inductor/utils.py:1806] [0/0] Not enough SMs to use max_autotune_gemm mode
+shapes / D_frozen / seed 0: 4.83M params, 6 layers, 0.691 GFLOPs/sample forward, device cuda
+step      0 | loss nan | val 0.062 | ood 0.072 | tag gap 0.246 | ari(frames) 0.534 | 5s
+  step 200 loss 1.9477  4,577 samples/s  eta 27.8 min
+  step 400 loss 1.4347  4,568 samples/s  eta 27.6 min
+  step 600 loss 1.3501  4,566 samples/s  eta 27.5 min
+  step 800 loss 1.3096  4,567 samples/s  eta 27.3 min
+  step 1000 loss 1.2727  4,565 samples/s  eta 27.1 min
+  step 1200 loss 1.2466  4,563 samples/s  eta 26.9 min
+  step 1400 loss 1.1886  4,561 samples/s  eta 26.8 min
+  step 1600 loss 1.1520  4,561 samples/s  eta 26.6 min
+  step 1800 loss 1.1204  4,560 samples/s  eta 26.4 min
+  step 2000 loss 1.0987  4,559 samples/s  eta 26.2 min
+  step 2200 loss 1.0631  4,558 samples/s  eta 26.0 min
+  step 2400 loss 1.0382  4,556 samples/s  eta 25.8 min
+step   2500 | loss 1.2596 | val 0.515 | ood 0.008 | tag gap 0.447 | ari(frames) 0.522 | 177s
+  step 2600 loss 1.0182  4,414 samples/s  eta 26.5 min
+  step 2800 loss 0.9940  4,421 samples/s  eta 26.3 min
+  step 3000 loss 0.9683  4,428 samples/s  eta 26.0 min
+  step 3200 loss 0.9552  4,433 samples/s  eta 25.8 min
+  step 3400 loss 0.9479  4,438 samples/s  eta 25.6 min
+  step 3600 loss 0.9216  4,442 samples/s  eta 25.4 min
+  step 3800 loss 0.9111  4,446 samples/s  eta 25.1 min
+  step 4000 loss 0.8917  4,450 samples/s  eta 24.9 min
+  step 4200 loss 0.8836  4,453 samples/s  eta 24.7 min
+  step 4400 loss 0.8580  4,457 samples/s  eta 24.5 min
+  step 4600 loss 0.8547  4,459 samples/s  eta 24.3 min
+  step 4800 loss 0.8369  4,463 samples/s  eta 24.1 min
+step   5000 | loss 0.9081 | val 0.604 | ood 0.061 | tag gap 0.423 | ari(frames) 0.532 | 324s
+  step 5000 loss 0.9413  4,392 samples/s  eta 24.3 min
+  step 5200 loss 0.8032  4,398 samples/s  eta 24.1 min
+  step 5400 loss 0.7931  4,403 samples/s  eta 23.8 min
+  step 5600 loss 0.7853  4,408 samples/s  eta 23.6 min
+  step 5800 loss 0.7834  4,413 samples/s  eta 23.4 min
+  step 6000 loss 0.7669  4,417 samples/s  eta 23.2 min
+  step 6200 loss 0.7498  4,421 samples/s  eta 23.0 min
+  step 6400 loss 0.7511  4,425 samples/s  eta 22.8 min
+  step 6600 loss 0.7417  4,429 samples/s  eta 22.5 min
+  step 6800 loss 0.7376  4,431 samples/s  eta 22.3 min
+  step 7000 loss 0.7166  4,434 samples/s  eta 22.1 min
+  step 7200 loss 0.6774  4,436 samples/s  eta 21.9 min
+  step 7400 loss 0.6077  4,438 samples/s  eta 21.7 min
+step   7500 | loss 0.7362 | val 0.732 | ood 0.122 | tag gap 0.417 | ari(frames) 0.508 | 469s
+  step 7600 loss 0.5609  4,394 samples/s  eta 21.8 min
+  step 7800 loss 0.5411  4,397 samples/s  eta 21.5 min
+  step 8000 loss 0.5228  4,400 samples/s  eta 21.3 min
+  step 8200 loss 0.5027  4,403 samples/s  eta 21.1 min
+  step 8400 loss 0.4565  4,405 samples/s  eta 20.9 min
+  step 8600 loss 0.4021  4,408 samples/s  eta 20.7 min
+  step 8800 loss 0.3830  4,410 samples/s  eta 20.5 min
+  step 9000 loss 0.3598  4,413 samples/s  eta 20.3 min
+  step 9200 loss 0.3536  4,415 samples/s  eta 20.1 min
+  step 9400 loss 0.3425  4,417 samples/s  eta 19.9 min
+  step 9600 loss 0.3309  4,420 samples/s  eta 19.7 min
+  step 9800 loss 0.3258  4,422 samples/s  eta 19.5 min
+step  10000 | loss 0.4097 | val 0.845 | ood 0.156 | tag gap 0.431 | ari(frames) 0.529 | 616s
+  step 10000 loss 0.3410  4,388 samples/s  eta 19.4 min
+  step 10200 loss 0.3040  4,391 samples/s  eta 19.2 min
+  step 10400 loss 0.3056  4,393 samples/s  eta 19.0 min
+  step 10600 loss 0.2944  4,396 samples/s  eta 18.8 min
+  step 10800 loss 0.2918  4,398 samples/s  eta 18.6 min
+  step 11000 loss 0.2808  4,401 samples/s  eta 18.4 min
+  step 11200 loss 0.2760  4,403 samples/s  eta 18.2 min
+  step 11400 loss 0.2644  4,405 samples/s  eta 18.0 min
+  step 11600 loss 0.2632  4,407 samples/s  eta 17.8 min
+  step 11800 loss 0.2566  4,409 samples/s  eta 17.6 min
+  step 12000 loss 0.2472  4,411 samples/s  eta 17.4 min
+  step 12200 loss 0.2392  4,413 samples/s  eta 17.2 min
+  step 12400 loss 0.2273  4,414 samples/s  eta 17.0 min
+step  12500 | loss 0.2692 | val 0.882 | ood 0.243 | tag gap 0.424 | ari(frames) 0.500 | 762s
+  step 12600 loss 0.2239  4,388 samples/s  eta 16.9 min
+  step 12800 loss 0.2177  4,391 samples/s  eta 16.7 min
+  step 13000 loss 0.2110  4,393 samples/s  eta 16.5 min
+  step 13200 loss 0.2069  4,394 samples/s  eta 16.3 min
+  step 13400 loss 0.1987  4,396 samples/s  eta 16.1 min
+  step 13600 loss 0.1889  4,398 samples/s  eta 15.9 min
+  step 13800 loss 0.1828  4,400 samples/s  eta 15.7 min
+  step 14000 loss 0.1799  4,402 samples/s  eta 15.5 min
+  step 14200 loss 0.1726  4,403 samples/s  eta 15.3 min
+  step 14400 loss 0.1666  4,405 samples/s  eta 15.1 min
+  step 14600 loss 0.1579  4,407 samples/s  eta 14.9 min
+  step 14800 loss 0.1596  4,408 samples/s  eta 14.7 min
+step  15000 | loss 0.1844 | val 0.912 | ood 0.322 | tag gap 0.420 | ari(frames) 0.515 | 908s
+  step 15000 loss 0.1870  4,386 samples/s  eta 14.6 min
+  step 15200 loss 0.1485  4,388 samples/s  eta 14.4 min
+  step 15400 loss 0.1420  4,390 samples/s  eta 14.2 min
+  step 15600 loss 0.1426  4,391 samples/s  eta 14.0 min
+  step 15800 loss 0.1339  4,393 samples/s  eta 13.8 min
+  step 16000 loss 0.1285  4,395 samples/s  eta 13.6 min
+  step 16200 loss 0.1264  4,396 samples/s  eta 13.4 min
+  step 16400 loss 0.1235  4,398 samples/s  eta 13.2 min
+  step 16600 loss 0.1179  4,399 samples/s  eta 13.0 min
+  step 16800 loss 0.1147  4,401 samples/s  eta 12.8 min
+  step 17000 loss 0.1088  4,402 samples/s  eta 12.6 min
+  step 17200 loss 0.1053  4,404 samples/s  eta 12.4 min
+  step 17400 loss 0.1068  4,405 samples/s  eta 12.2 min
+step  17500 | loss 0.1241 | val 0.924 | ood 0.369 | tag gap 0.413 | ari(frames) 0.505 | 1054s
+  step 17600 loss 0.1011  4,387 samples/s  eta 12.1 min
+  step 17800 loss 0.0974  4,388 samples/s  eta 11.9 min
+  step 18000 loss 0.0961  4,390 samples/s  eta 11.7 min
+  step 18200 loss 0.0928  4,391 samples/s  eta 11.5 min
+  step 18400 loss 0.0894  4,393 samples/s  eta 11.3 min
+  step 18600 loss 0.0858  4,394 samples/s  eta 11.1 min
+  step 18800 loss 0.0833  4,395 samples/s  eta 10.9 min
+  step 19000 loss 0.0829  4,397 samples/s  eta 10.7 min
+  step 19200 loss 0.0788  4,398 samples/s  eta 10.5 min
+  step 19400 loss 0.0728  4,399 samples/s  eta 10.3 min
+  step 19600 loss 0.0714  4,401 samples/s  eta 10.1 min
+  step 19800 loss 0.0654  4,402 samples/s  eta 9.9 min
+step  20000 | loss 0.0826 | val 0.930 | ood 0.343 | tag gap 0.415 | ari(frames) 0.492 | 1200s
+  step 20000 loss 0.0520  4,385 samples/s  eta 9.7 min
+  step 20200 loss 0.0669  4,386 samples/s  eta 9.5 min
+  step 20400 loss 0.0589  4,388 samples/s  eta 9.3 min
+  step 20600 loss 0.0589  4,389 samples/s  eta 9.1 min
+  step 20800 loss 0.0552  4,390 samples/s  eta 8.9 min
+  step 21000 loss 0.0544  4,392 samples/s  eta 8.7 min
+  step 21200 loss 0.0518  4,393 samples/s  eta 8.5 min
+  step 21400 loss 0.0517  4,395 samples/s  eta 8.3 min
+  step 21600 loss 0.0477  4,396 samples/s  eta 8.2 min
+  step 21800 loss 0.0442  4,397 samples/s  eta 8.0 min
+  step 22000 loss 0.0444  4,399 samples/s  eta 7.8 min
+  step 22200 loss 0.0415  4,400 samples/s  eta 7.6 min
+  step 22400 loss 0.0386  4,401 samples/s  eta 7.4 min
+step  22500 | loss 0.0506 | val 0.930 | ood 0.379 | tag gap 0.414 | ari(frames) 0.499 | 1346s
+  step 22600 loss 0.0391  4,386 samples/s  eta 7.2 min
+  step 22800 loss 0.0364  4,388 samples/s  eta 7.0 min
+  step 23000 loss 0.0321  4,389 samples/s  eta 6.8 min
+  step 23200 loss 0.0332  4,390 samples/s  eta 6.6 min
+  step 23400 loss 0.0307  4,391 samples/s  eta 6.4 min
+  step 23600 loss 0.0291  4,393 samples/s  eta 6.2 min
+  step 23800 loss 0.0264  4,394 samples/s  eta 6.0 min
+  step 24000 loss 0.0257  4,395 samples/s  eta 5.8 min
+  step 24200 loss 0.0245  4,396 samples/s  eta 5.6 min
+  step 24400 loss 0.0232  4,398 samples/s  eta 5.4 min
+  step 24600 loss 0.0228  4,399 samples/s  eta 5.2 min
+  step 24800 loss 0.0201  4,400 samples/s  eta 5.0 min
+step  25000 | loss 0.0274 | val 0.933 | ood 0.381 | tag gap 0.411 | ari(frames) 0.514 | 1491s
+  step 25000 loss 0.0247  4,386 samples/s  eta 4.9 min
+  step 25200 loss 0.0184  4,387 samples/s  eta 4.7 min
+  step 25400 loss 0.0176  4,388 samples/s  eta 4.5 min
+  step 25600 loss 0.0159  4,389 samples/s  eta 4.3 min
+  step 25800 loss 0.0157  4,390 samples/s  eta 4.1 min
+  step 26000 loss 0.0158  4,391 samples/s  eta 3.9 min
+  step 26200 loss 0.0136  4,392 samples/s  eta 3.7 min
+  step 26400 loss 0.0132  4,393 samples/s  eta 3.5 min
+  step 26600 loss 0.0130  4,394 samples/s  eta 3.3 min
+  step 26800 loss 0.0107  4,395 samples/s  eta 3.1 min
+  step 27000 loss 0.0114  4,396 samples/s  eta 2.9 min
+  step 27200 loss 0.0099  4,397 samples/s  eta 2.7 min
+  step 27400 loss 0.0085  4,398 samples/s  eta 2.5 min
+step  27500 | loss 0.0135 | val 0.937 | ood 0.384 | tag gap 0.413 | ari(frames) 0.494 | 1637s
+  step 27600 loss 0.0087  4,387 samples/s  eta 2.3 min
+  step 27800 loss 0.0094  4,388 samples/s  eta 2.1 min
+  step 28000 loss 0.0071  4,389 samples/s  eta 1.9 min
+  step 28200 loss 0.0076  4,390 samples/s  eta 1.7 min
+  step 28400 loss 0.0076  4,391 samples/s  eta 1.6 min
+  step 28600 loss 0.0070  4,392 samples/s  eta 1.4 min
+  step 28800 loss 0.0068  4,392 samples/s  eta 1.2 min
+  step 29000 loss 0.0063  4,393 samples/s  eta 1.0 min
+  step 29200 loss 0.0055  4,394 samples/s  eta 0.8 min
+  step 29400 loss 0.0058  4,395 samples/s  eta 0.6 min
+  step 29600 loss 0.0056  4,396 samples/s  eta 0.4 min
+  step 29800 loss 0.0053  4,396 samples/s  eta 0.2 min
+step  30000 | loss 0.0067 | val 0.934 | ood 0.356 | tag gap 0.411 | ari(frames) 0.487 | 1784s
+{
+ "val": {
+  "acc": 0.9366436643664366,
+  "acc_pair": 0.9734125742883953,
+  "acc_attr": 0.9764737156908354,
+  "acc_rel": 0.8155928095334276,
+  "n": 19998
+ },
+ "test": {
+  "acc": 0.9375437543754376,
+  "acc_pair": 0.9705019305019305,
+  "acc_attr": 0.974905145443653,
+  "acc_rel": 0.8247236180904522,
+  "n": 19998
+ },
+ "test_ood": {
+  "acc": 0.3681,
+  "acc_pair": 0.3681,
+  "acc_ood": 0.3681,
+  "acc_attr": 0.3681,
+  "n": 10000
+ }
+}
+grouping: {
+ "val": {
+  "images": 512,
+  "k": 6,
+  "fg_ari_content": 0.4439202415165805,
+  "fg_ari_frames": 0.4760996218748683,
+  "dial_same": 0.5284217931330204,
+  "dial_diff": 0.12440162058919668,
+  "tag_gap": 0.4040201725438237,
+  "gyro_same": 0.3817940130829811,
+  "gyro_diff": 0.14629142545163631,
+  "gyro_gap": 0.2355025876313448,
+  "dial_sync": 0.5271107479929924,
+  "gyro_sync": 0.5508224070072174,
+  "tag_gap_per_layer": [
+   0.4040201725438237,
+   0.4040201725438237,
+   0.4040201725438237,
+   0.4040201725438237,
+   0.4040201725438237,
+   0.4040201725438237
+  ],
+  "gyro_gap_per_layer": [
+   0.2355025876313448,
+   0.2355025876313448,
+   0.2355025876313448,
+   0.2355025876313448,
+   0.2355025876313448,
+   0.2355025876313448
+  ]
+ }
+}
+saved runs/shapes/D_frozen/seed0/results.json

@@ -1,0 +1,72 @@
+{
+ "task": "shapes",
+ "variant": "C",
+ "seed": 2,
+ "preset": "full",
+ "config": {
+  "weight_decay": 0.05,
+  "grad_clip": 1.0,
+  "eval_questions": 4096,
+  "final_eval_questions": 0,
+  "grouping_images": 256,
+  "final_grouping_images": 512,
+  "heads": 4,
+  "layers": 6,
+  "batch": 256,
+  "steps": 30000,
+  "lr": 0.001,
+  "warmup": 1000,
+  "eval_every": 2500,
+  "frame_init_std": 1.0
+ },
+ "layers": 6,
+ "n_params": 4906312,
+ "flops_per_sample": 715690304.0,
+ "matched_target_flops": null,
+ "train_time_s": 3090.4943385124207,
+ "samples_per_s": 2485.0393363595977,
+ "device": "cuda",
+ "final": {
+  "val": {
+   "acc": 0.9641464146414641,
+   "acc_pair": 0.9846731310603691,
+   "acc_attr": 0.9872399813916395,
+   "acc_rel": 0.8939608159967684,
+   "n": 19998
+  },
+  "test": {
+   "acc": 0.9633463346334633,
+   "acc_pair": 0.983011583011583,
+   "acc_attr": 0.985888304599614,
+   "acc_rel": 0.8952763819095477,
+   "n": 19998
+  },
+  "test_ood": {
+   "acc": 0.6854,
+   "acc_pair": 0.6854,
+   "acc_ood": 0.6854,
+   "acc_attr": 0.6854,
+   "n": 10000
+  },
+  "grouping": {
+   "val": {
+    "images": 512,
+    "k": 6,
+    "fg_ari_content": 0.5213975902058068,
+    "fg_ari_frames": 0.5359108405022148,
+    "gyro_same": 0.5955168232321739,
+    "gyro_diff": 0.23194029927253723,
+    "gyro_gap": 0.3635765239596367,
+    "gyro_sync": 0.6307414025068283,
+    "gyro_gap_per_layer": [
+     0.3276695553213358,
+     0.32729307748377323,
+     0.32977594807744026,
+     0.361240703612566,
+     0.3705745115876198,
+     0.3635765239596367
+    ]
+   }
+  }
+ }
+}
